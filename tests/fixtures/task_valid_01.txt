@@ -1,0 +1,8 @@
+﻿NAME task_valid_01
+CONTAINER 8 5
+
+ITEMS
+# id width height value can_rotate
+A 3 2 8 1
+B 4 3 12 1
+C 2 1 4 0

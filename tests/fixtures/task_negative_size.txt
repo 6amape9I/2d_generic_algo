@@ -1,0 +1,5 @@
+﻿NAME task_negative
+CONTAINER 8 5
+
+ITEMS
+A -2 2 4 1

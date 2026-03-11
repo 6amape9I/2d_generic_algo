@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: knapsack2d
+Version: 0.1.0
+Summary: Educational project for constrained 0/1 2D knapsack
+Requires-Python: >=3.11
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0; extra == "dev"
+Provides-Extra: ui
+Requires-Dist: PySide6>=6.7; extra == "ui"
+Requires-Dist: pyqtgraph>=0.13; extra == "ui"

@@ -1,0 +1,6 @@
+﻿NAME task_duplicate
+CONTAINER 8 5
+
+ITEMS
+A 2 2 4 1
+A 3 2 5 1
