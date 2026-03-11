@@ -1,5 +1,14 @@
 ﻿from __future__ import annotations
 
+import sys
 
-def run() -> None:
-    raise NotImplementedError("UI is not implemented yet")
+from PySide6.QtWidgets import QApplication
+
+from knapsack2d.ui.main_window import MainWindow
+
+
+def run() -> int:
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    return app.exec()
