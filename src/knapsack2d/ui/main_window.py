@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from knapsack2d.baseline.exhaustive import ExhaustiveSearchResult
+from knapsack2d.config import UiEnvConfig, load_ui_env_config
 from knapsack2d.ga.history import GenerationSnapshot, IndividualSnapshot
 from knapsack2d.ga.optimizer import GAResult
 from knapsack2d.models import CandidatePoint, DecodeStep, ProblemInstance
@@ -32,32 +34,35 @@ from knapsack2d.ui.models.generation_table_model import GenerationTableModel
 from knapsack2d.ui.models.individual_table_model import IndividualTableModel
 from knapsack2d.ui.models.placement_table_model import PlacementTableModel
 from knapsack2d.ui.presenters.history_mapper import HistoryMapper
-from knapsack2d.ui.widgets.charts_panel import ChartsPanel
+from knapsack2d.ui.run_models import PopulationStudyResult, RunOutcome
 from knapsack2d.ui.widgets.control_panel import ControlPanel
 from knapsack2d.ui.widgets.decode_steps_panel import DecodeStepsPanel
 from knapsack2d.ui.widgets.individual_details_panel import IndividualDetailsPanel
 from knapsack2d.ui.widgets.layout_scene import LayoutScene
 from knapsack2d.ui.widgets.layout_view import LayoutView
+from knapsack2d.ui.widgets.statistics_dialog import StatisticsDialog
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, ui_env: UiEnvConfig | None = None) -> None:
         super().__init__()
+        self._ui_env = ui_env or load_ui_env_config()
+
         self.setWindowTitle("2D Knapsack GA")
-        self.resize(1720, 980)
+        self.resize(1840, 1040)
 
         self._problem: ProblemInstance | None = None
         self._problem_path: Path | None = None
         self._result: GAResult | None = None
+        self._population_study: PopulationStudyResult | None = None
+        self._exhaustive_baseline: ExhaustiveSearchResult | None = None
         self._mapper = HistoryMapper()
 
         self._current_generation_index = -1
         self._current_generation: GenerationSnapshot | None = None
         self._current_individual: IndividualSnapshot | None = None
-
         self._selected_placement_index: int | None = None
         self._selected_step_index: int = -1
-
         self._events_suspended = False
 
         self._play_timer = QTimer(self)
@@ -65,8 +70,8 @@ class MainWindow(QMainWindow):
 
         self.run_controller = RunController()
 
-        self.control_panel = ControlPanel()
-        self.charts_panel = ChartsPanel()
+        self.control_panel = ControlPanel(self._ui_env)
+        self.statistics_dialog = StatisticsDialog(self)
 
         self.generation_model = GenerationTableModel()
         self.generation_table = QTableView()
@@ -76,12 +81,11 @@ class MainWindow(QMainWindow):
         self.individual_table = QTableView()
         self.individual_table.setModel(self.individual_model)
 
-        self.layout_scene = LayoutScene()
+        self.layout_scene = LayoutScene(self._ui_env)
         self.layout_view = LayoutView()
         self.layout_view.setScene(self.layout_scene)
 
         self.details_panel = IndividualDetailsPanel()
-
         self.gene_model = GeneTableModel()
         self.gene_table = QTableView()
         self.gene_table.setModel(self.gene_model)
@@ -92,9 +96,9 @@ class MainWindow(QMainWindow):
 
         self.decode_steps_panel = DecodeStepsPanel()
 
-        self.show_virtual_checkbox = QCheckBox("Show virtual blocks")
+        self.show_virtual_checkbox = QCheckBox("Show virtual")
         self.show_virtual_checkbox.setChecked(True)
-        self.show_overflow_checkbox = QCheckBox("Show overflow blocks")
+        self.show_overflow_checkbox = QCheckBox("Show overflow")
         self.show_overflow_checkbox.setChecked(True)
         self.show_labels_checkbox = QCheckBox("Show labels")
         self.show_labels_checkbox.setChecked(True)
@@ -122,16 +126,30 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._configure_tables()
         self._wire_signals()
+        self._load_default_task()
 
-        self.statusBar().showMessage("Load a task (.txt) and run GA")
+        if self._problem is None:
+            self.statusBar().showMessage("Load a task (.txt) and run GA")
 
-    def set_result(self, problem: ProblemInstance, result: GAResult) -> None:
+    def set_result(
+        self,
+        problem: ProblemInstance,
+        result: GAResult,
+        *,
+        population_study: PopulationStudyResult | None = None,
+        exhaustive_baseline: ExhaustiveSearchResult | None = None,
+    ) -> None:
         self._problem = problem
         self._result = result
+        self._population_study = population_study
+        self._exhaustive_baseline = exhaustive_baseline
+        self.control_panel.set_task_name(problem.name)
 
         generations = list(result.history.generations)
         self.generation_model.set_generations(generations)
-        self.charts_panel.set_history(result.history)
+        self.statistics_dialog.set_history(result.history)
+        self.statistics_dialog.set_population_study(population_study)
+        self.statistics_dialog.set_baseline_comparison(result, exhaustive_baseline)
 
         if not generations:
             self._clear_generation_selection()
@@ -143,27 +161,25 @@ class MainWindow(QMainWindow):
         self._select_generation_index(0, sync_table=True, sync_slider=True)
 
         best = result.best_individual.fitness_breakdown.total_value
+        study_suffix = ""
+        if population_study is not None:
+            study_suffix = f" Best study population: {population_study.best_point.population_size}."
+        baseline_suffix = ""
+        if exhaustive_baseline is not None:
+            baseline_suffix = f" Exhaustive: {exhaustive_baseline.status}."
         self.statusBar().showMessage(
-            f"Run finished. Best total value: {best}. Duration: {result.duration_seconds:.3f}s"
+            f"Run finished. Best total value: {best}. Duration: {result.duration_seconds:.3f}s.{study_suffix}{baseline_suffix}"
         )
 
     def _build_layout(self) -> None:
         root = QWidget()
         root_layout = QVBoxLayout(root)
-
         root_layout.addWidget(self.control_panel)
 
-        splitter = QSplitter(Qt.Horizontal)
+        main_splitter = QSplitter(Qt.Horizontal)
 
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("Generations"))
-        left_layout.addWidget(self.generation_table)
-        left_layout.addWidget(QLabel("Individuals"))
-        left_layout.addWidget(self.individual_table)
-
-        center = QWidget()
-        center_layout = QVBoxLayout(center)
+        render_block = QWidget()
+        render_layout = QVBoxLayout(render_block)
 
         view_toolbar = QHBoxLayout()
         view_toolbar.addWidget(self.zoom_fit_button)
@@ -179,9 +195,28 @@ class MainWindow(QMainWindow):
             "Legend: blue=valid, red dashed=overflow (0 value), gray=virtual blocks"
         )
 
-        center_layout.addLayout(view_toolbar)
-        center_layout.addWidget(legend)
-        center_layout.addWidget(self.layout_view)
+        timeline_widget = QWidget()
+        timeline_layout = QHBoxLayout(timeline_widget)
+        timeline_layout.addWidget(self.prev_generation_button)
+        timeline_layout.addWidget(self.next_generation_button)
+        timeline_layout.addWidget(self.play_button)
+        timeline_layout.addWidget(self.pause_button)
+        timeline_layout.addWidget(self.generation_slider, stretch=1)
+        timeline_layout.addWidget(self.timeline_label)
+
+        render_layout.addLayout(view_toolbar)
+        render_layout.addWidget(legend)
+        render_layout.addWidget(self.layout_view, stretch=1)
+        render_layout.addWidget(timeline_widget)
+
+        info_splitter = QSplitter(Qt.Vertical)
+
+        tables_widget = QWidget()
+        tables_layout = QVBoxLayout(tables_widget)
+        tables_layout.addWidget(QLabel("Generations"))
+        tables_layout.addWidget(self.generation_table)
+        tables_layout.addWidget(QLabel("Individuals"))
+        tables_layout.addWidget(self.individual_table)
 
         right_tabs = QTabWidget()
         right_tabs.addTab(self.details_panel, "Details")
@@ -189,25 +224,19 @@ class MainWindow(QMainWindow):
         right_tabs.addTab(self.placement_table, "Placements")
         right_tabs.addTab(self.decode_steps_panel, "Decode Steps")
 
-        splitter.addWidget(left)
-        splitter.addWidget(center)
-        splitter.addWidget(right_tabs)
-        splitter.setStretchFactor(1, 1)
+        info_splitter.addWidget(tables_widget)
+        info_splitter.addWidget(right_tabs)
+        info_splitter.setStretchFactor(0, 0)
+        info_splitter.setStretchFactor(1, 1)
+        info_splitter.setSizes([360, 520])
 
-        root_layout.addWidget(splitter)
+        main_splitter.addWidget(render_block)
+        main_splitter.addWidget(info_splitter)
+        main_splitter.setStretchFactor(0, 1)
+        main_splitter.setStretchFactor(1, 0)
+        main_splitter.setSizes([1180, 620])
 
-        timeline_widget = QWidget()
-        timeline_layout = QHBoxLayout(timeline_widget)
-        timeline_layout.addWidget(self.prev_generation_button)
-        timeline_layout.addWidget(self.next_generation_button)
-        timeline_layout.addWidget(self.play_button)
-        timeline_layout.addWidget(self.pause_button)
-        timeline_layout.addWidget(self.generation_slider)
-        timeline_layout.addWidget(self.timeline_label)
-        root_layout.addWidget(timeline_widget)
-
-        root_layout.addWidget(self.charts_panel)
-
+        root_layout.addWidget(main_splitter, stretch=1)
         self.setCentralWidget(root)
 
     def _configure_tables(self) -> None:
@@ -229,7 +258,7 @@ class MainWindow(QMainWindow):
         self.control_panel.load_task_requested.connect(self._on_load_task_requested)
         self.control_panel.run_requested.connect(self._on_run_requested)
         self.control_panel.stop_requested.connect(self._on_stop_requested)
-
+        self.control_panel.statistics_requested.connect(self._on_statistics_requested)
         self.control_panel.export_history_requested.connect(self._on_export_history_requested)
         self.control_panel.export_layout_requested.connect(self._on_export_layout_requested)
         self.control_panel.export_report_requested.connect(self._on_export_report_requested)
@@ -252,7 +281,6 @@ class MainWindow(QMainWindow):
         self.gene_table.selectionModel().selectionChanged.connect(
             lambda *_: self._on_gene_selected()
         )
-
         self.decode_steps_panel.step_selected.connect(self._on_decode_step_selected)
 
         self.layout_scene.placement_clicked.connect(self._on_scene_placement_clicked)
@@ -273,6 +301,26 @@ class MainWindow(QMainWindow):
         self.pause_button.clicked.connect(self._on_pause_requested)
         self.generation_slider.valueChanged.connect(self._on_generation_slider_changed)
 
+    def _load_default_task(self) -> None:
+        default_path = Path.cwd() / "data" / "tasks" / f"{self._ui_env.default_task_name}.txt"
+        if default_path.exists():
+            self._load_problem_file(default_path, announce=False)
+
+    def _load_problem_file(self, path: str | Path, *, announce: bool = True) -> None:
+        file_path = Path(path)
+        problem = load_problem_txt(file_path)
+        self._problem = problem
+        self._problem_path = file_path
+        self.control_panel.set_task_name(problem.name)
+        if announce:
+            self.statusBar().showMessage(
+                f"Loaded task '{problem.name}' with {len(problem.items)} items"
+            )
+        else:
+            self.statusBar().showMessage(
+                f"Default task loaded: '{problem.name}' with {len(problem.items)} items"
+            )
+
     def _on_load_task_requested(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -284,16 +332,9 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            problem = load_problem_txt(path)
+            self._load_problem_file(path)
         except Exception as exc:
             QMessageBox.critical(self, "Load Error", f"Failed to load task:\n{exc}")
-            return
-
-        self._problem = problem
-        self._problem_path = Path(path)
-        self.statusBar().showMessage(
-            f"Loaded task '{problem.name}' with {len(problem.items)} items"
-        )
 
     def _on_run_requested(self) -> None:
         if self._problem is None:
@@ -302,6 +343,8 @@ class MainWindow(QMainWindow):
 
         try:
             config = self.control_panel.build_config()
+            population_study = self.control_panel.population_study_config()
+            exhaustive_config = self.control_panel.exhaustive_config()
         except Exception as exc:
             QMessageBox.critical(self, "Invalid Config", str(exc))
             return
@@ -310,6 +353,8 @@ class MainWindow(QMainWindow):
             problem=self._problem,
             config=config,
             void_block_policy=self.control_panel.selected_void_policy(),
+            population_study=population_study,
+            exhaustive_search=exhaustive_config,
         )
 
         try:
@@ -319,16 +364,29 @@ class MainWindow(QMainWindow):
 
     def _on_stop_requested(self) -> None:
         self.run_controller.request_stop()
-        self.statusBar().showMessage("Stop requested. Waiting for current generation to finish.")
+        self.statusBar().showMessage("Stop requested. Waiting for the current run to finish.")
+
+    def _on_statistics_requested(self) -> None:
+        if self._result is None:
+            QMessageBox.warning(self, "No results", "Run GA before opening statistics.")
+            return
+        self.statistics_dialog.show()
+        self.statistics_dialog.raise_()
+        self.statistics_dialog.activateWindow()
 
     def _on_run_started(self) -> None:
         self.statusBar().showMessage("GA is running...")
 
-    def _on_run_finished(self, problem: object, result: object) -> None:
-        if not isinstance(problem, ProblemInstance) or not isinstance(result, GAResult):
+    def _on_run_finished(self, problem: object, outcome: object) -> None:
+        if not isinstance(problem, ProblemInstance) or not isinstance(outcome, RunOutcome):
             QMessageBox.critical(self, "Run Error", "Unexpected run result payload.")
             return
-        self.set_result(problem, result)
+        self.set_result(
+            problem,
+            outcome.primary_result,
+            population_study=outcome.population_study,
+            exhaustive_baseline=outcome.exhaustive_baseline,
+        )
 
     def _on_run_failed(self, error: str) -> None:
         QMessageBox.critical(self, "Run Failed", error)
@@ -373,9 +431,7 @@ class MainWindow(QMainWindow):
             with self._suspend_events():
                 self.generation_slider.setValue(index)
 
-        self.timeline_label.setText(
-            f"Generation: {index + 1}/{len(generations)}"
-        )
+        self.timeline_label.setText(f"Generation: {index + 1}/{len(generations)}")
 
         individuals = list(self._current_generation.individuals)
         self.individual_model.set_individuals(individuals)
@@ -545,7 +601,7 @@ class MainWindow(QMainWindow):
     def _on_play_requested(self) -> None:
         if self._result is None:
             return
-        self._play_timer.start(self.control_panel.play_interval_spin.value())
+        self._play_timer.start(self.control_panel.play_interval_ms())
 
     def _on_pause_requested(self) -> None:
         self._play_timer.stop()
@@ -573,7 +629,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            self._mapper.save_history_json(path, self._problem, self._result)
+            self._mapper.save_history_json(
+                path,
+                self._problem,
+                self._result,
+                population_study=self._population_study,
+                exhaustive_baseline=self._exhaustive_baseline,
+            )
         except Exception as exc:
             QMessageBox.critical(self, "Export Error", str(exc))
             return
@@ -665,4 +727,5 @@ class MainWindow(QMainWindow):
         self._play_timer.stop()
         if self.run_controller.is_running:
             self.run_controller.request_stop()
+        self.statistics_dialog.close()
         super().closeEvent(event)

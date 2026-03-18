@@ -39,3 +39,30 @@ def test_optimizer_smoke() -> None:
 
     best_values = [snapshot.best_total_value for snapshot in result.history.generations]
     assert all(curr >= prev for prev, curr in zip(best_values, best_values[1:]))
+
+
+def test_optimizer_stops_early_on_full_fill_ratio() -> None:
+    problem = (
+        ProblemBuilder()
+        .set_name("ga-full-fill")
+        .set_container(2, 2)
+        .add_item("A", 2, 2, 1)
+        .build()
+    )
+    config = GAConfig(
+        population_size=4,
+        max_generations=12,
+        stagnation_limit=12,
+        seed=1,
+        tournament_size=2,
+    )
+    optimizer = GeneticOptimizer(
+        config=config,
+        decoder=LeftBottomDecoder(),
+        fitness_evaluator=FitnessEvaluator(),
+    )
+
+    result = optimizer.run(problem)
+
+    assert result.best_individual.fitness_breakdown.fill_ratio == 1.0
+    assert len(result.history.generations) == 1

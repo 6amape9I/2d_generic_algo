@@ -14,7 +14,7 @@ from knapsack2d.ga.individual import Individual
 from knapsack2d.ga.initializer import build_initial_chromosomes, random_chromosome
 from knapsack2d.ga.mutation import apply_mutations
 from knapsack2d.ga.selection import tournament_select
-from knapsack2d.models import ProblemInstance
+from knapsack2d.models import DecodedLayout, FitnessBreakdown, ProblemInstance
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,10 @@ class GeneticOptimizer:
         self._rng = rng or random.Random(config.seed)
         self._individual_counter = 0
         self._stop_requested = False
+        self._evaluation_cache: dict[
+            tuple[tuple[str, ...], tuple[bool, ...]],
+            tuple[DecodedLayout, FitnessBreakdown],
+        ] = {}
 
     def request_stop(self) -> None:
         self._stop_requested = True
@@ -84,19 +88,11 @@ class GeneticOptimizer:
         best_overall = population[0]
         stagnation_counter = 0
 
-        if self._stop_requested:
-            return GAResult(
-                best_individual=best_overall,
-                final_population=tuple(population),
-                history=history,
-                config=self._config,
-                duration_seconds=time.perf_counter() - run_start,
-            )
+        if self._stop_requested or self._is_full_container(best_overall):
+            return self._build_result(best_overall, population, history, run_start)
 
         for generation_index in range(1, self._config.max_generations):
-            if self._stop_requested:
-                break
-            if self._is_time_limit_reached(run_start):
+            if self._stop_requested or self._is_time_limit_reached(run_start):
                 break
 
             generation_start = time.perf_counter()
@@ -139,11 +135,22 @@ class GeneticOptimizer:
                 )
             )
 
+            if self._is_full_container(best_overall):
+                break
             if stagnation_counter >= self._config.stagnation_limit:
                 break
             if self._is_time_limit_reached(run_start):
                 break
 
+        return self._build_result(best_overall, population, history, run_start)
+
+    def _build_result(
+        self,
+        best_overall: Individual,
+        population: list[Individual],
+        history: RunHistory,
+        run_start: float,
+    ) -> GAResult:
         return GAResult(
             best_individual=best_overall,
             final_population=tuple(population),
@@ -164,9 +171,8 @@ class GeneticOptimizer:
 
         elite_count = self._config.resolved_elite_count
         for elite in current_population[:elite_count]:
-            clone = self._evaluate(
-                problem=problem,
-                chromosome=elite.chromosome,
+            clone = self._clone_individual(
+                elite,
                 generation_index=generation_index,
                 origin_type="elite",
                 parent_ids=(elite.individual_id,),
@@ -201,12 +207,18 @@ class GeneticOptimizer:
                 child_chromosome = parent_a.chromosome
                 origin_type = "crossover"
 
+            reference_layout = (
+                parent_a.decoded_layout
+                if parent_a.fitness_key >= parent_b.fitness_key
+                else parent_b.decoded_layout
+            )
             child_chromosome, changed = apply_mutations(
                 problem=problem,
                 chromosome=child_chromosome,
                 rng=self._rng,
                 p_order_mutation=self._config.p_order_mutation,
                 p_rotation_mutation=self._config.p_rotation_mutation,
+                reference_layout=reference_layout,
             )
             if changed:
                 origin_type = "mutation"
@@ -232,20 +244,17 @@ class GeneticOptimizer:
             for fallback in current_population:
                 if len(next_population) >= self._config.population_size:
                     break
-                clone = self._evaluate(
-                    problem=problem,
-                    chromosome=fallback.chromosome,
+                signature = self._chromosome_signature(fallback.chromosome)
+                clone = self._clone_individual(
+                    fallback,
                     generation_index=generation_index,
                     origin_type="elite",
                     parent_ids=(fallback.individual_id,),
                 )
-                signature = self._chromosome_signature(clone.chromosome)
-                if signature in signatures:
-                    continue
                 next_population.append(clone)
                 signatures.add(signature)
 
-        return next_population
+        return next_population[: self._config.population_size]
 
     def _deduplicate_child(
         self,
@@ -267,6 +276,7 @@ class GeneticOptimizer:
                 rng=self._rng,
                 p_order_mutation=1.0,
                 p_rotation_mutation=1.0,
+                reference_layout=None,
             )
             if not changed:
                 continue
@@ -275,10 +285,11 @@ class GeneticOptimizer:
                 return candidate, "mutation"
 
         if self._config.duplicate_random_immigrant:
-            immigrant = random_chromosome(problem, self._rng)
-            while self._chromosome_signature(immigrant) in used_signatures:
+            max_attempts = max(10, len(used_signatures) * 4)
+            for _ in range(max_attempts):
                 immigrant = random_chromosome(problem, self._rng)
-            return immigrant, "immigrant"
+                if self._chromosome_signature(immigrant) not in used_signatures:
+                    return immigrant, "immigrant"
 
         return chromosome, origin_type
 
@@ -298,11 +309,14 @@ class GeneticOptimizer:
 
         signatures = {self._chromosome_signature(ind.chromosome) for ind in kept}
         immigrants: list[Individual] = []
-        while len(immigrants) < replace_count:
+        attempts = 0
+        max_attempts = max(20, replace_count * 20)
+        while len(immigrants) < replace_count and attempts < max_attempts:
             if self._stop_requested:
                 break
             chromosome = random_chromosome(problem, self._rng)
             signature = self._chromosome_signature(chromosome)
+            attempts += 1
             if signature in signatures:
                 continue
             signatures.add(signature)
@@ -318,6 +332,24 @@ class GeneticOptimizer:
 
         return kept + immigrants
 
+    def _clone_individual(
+        self,
+        individual: Individual,
+        *,
+        generation_index: int,
+        origin_type: str,
+        parent_ids: tuple[str, ...] | None,
+    ) -> Individual:
+        return Individual(
+            individual_id=self._next_individual_id(generation_index),
+            generation_index=generation_index,
+            chromosome=individual.chromosome,
+            fitness_breakdown=individual.fitness_breakdown,
+            decoded_layout=individual.decoded_layout,
+            origin_type=origin_type,
+            parent_ids=parent_ids,
+        )
+
     def _evaluate(
         self,
         *,
@@ -328,9 +360,16 @@ class GeneticOptimizer:
         parent_ids: tuple[str, ...] | None,
     ) -> Individual:
         normalized = chromosome.normalized(problem)
-        sequence = to_sequence_solution(problem, normalized)
-        layout = self._decoder.decode(problem, sequence)
-        fitness = self._fitness_evaluator.evaluate(problem, layout)
+        signature = self._chromosome_signature(normalized)
+
+        cached = self._evaluation_cache.get(signature)
+        if cached is None:
+            sequence = to_sequence_solution(problem, normalized)
+            layout = self._decoder.decode(problem, sequence)
+            fitness = self._fitness_evaluator.evaluate(problem, layout)
+            self._evaluation_cache[signature] = (layout, fitness)
+        else:
+            layout, fitness = cached
 
         return Individual(
             individual_id=self._next_individual_id(generation_index),
@@ -350,6 +389,9 @@ class GeneticOptimizer:
         if self._config.max_time_seconds is None:
             return False
         return (time.perf_counter() - run_start) >= self._config.max_time_seconds
+
+    def _is_full_container(self, individual: Individual) -> bool:
+        return individual.fitness_breakdown.fill_ratio >= 1.0
 
     def _chromosome_signature(
         self,

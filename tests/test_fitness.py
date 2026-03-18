@@ -33,3 +33,39 @@ def test_fitness_counts_valid_overflow_and_virtual() -> None:
     assert breakdown.virtual_blocks_count == 1
     assert breakdown.used_area_inside == 4
     assert breakdown.fill_ratio == 0.25
+    assert breakdown.large_first_score == 8
+
+
+def test_fitness_rewards_large_blocks_earlier() -> None:
+    problem = (
+        ProblemBuilder()
+        .set_name("fitness-large-first")
+        .set_container(5, 3)
+        .add_item("L", 3, 2, 1)
+        .add_item("S", 1, 2, 1)
+        .build()
+    )
+
+    layout_large_first = DecodedLayout(
+        placements=[
+            Placement("L", 0, 0, 3, 2, False, 6),
+            Placement("S", 3, 0, 1, 2, False, 2),
+        ],
+        steps=[],
+        used_solution_order=["L", "S"],
+    )
+    layout_small_first = DecodedLayout(
+        placements=[
+            Placement("S", 3, 0, 1, 2, False, 2),
+            Placement("L", 0, 0, 3, 2, False, 6),
+        ],
+        steps=[],
+        used_solution_order=["S", "L"],
+    )
+
+    evaluator = FitnessEvaluator()
+    large_first = evaluator.evaluate(problem, layout_large_first)
+    small_first = evaluator.evaluate(problem, layout_small_first)
+
+    assert large_first.total_value == small_first.total_value
+    assert large_first.large_first_score > small_first.large_first_score

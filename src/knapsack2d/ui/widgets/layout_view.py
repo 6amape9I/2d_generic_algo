@@ -1,15 +1,17 @@
 ﻿from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QWheelEvent
+from PySide6.QtGui import QPainter, QWheelEvent
 from PySide6.QtWidgets import QGraphicsView
 
 
 class LayoutView(QGraphicsView):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setRenderHints(self.renderHints())
+        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
+        self.setAlignment(Qt.AlignCenter)
         self.set_pan_enabled(True)
 
     def set_pan_enabled(self, enabled: bool) -> None:
@@ -26,8 +28,12 @@ class LayoutView(QGraphicsView):
 
     def reset_zoom(self) -> None:
         self.resetTransform()
+        if self.scene() is not None:
+            self.centerOn(self.scene().sceneRect().center())
 
     def fit_container(self) -> None:
         if self.scene() is None:
             return
         self.fitInView(self.scene().sceneRect(), Qt.KeepAspectRatio)
+        self.centerOn(self.scene().sceneRect().center())
+        self.setAlignment(Qt.AlignCenter)

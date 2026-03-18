@@ -73,13 +73,19 @@ def build_initial_chromosomes(
         chromosomes.append(chromosome)
         signatures.add(signature)
 
-    while len(chromosomes) < population_size:
+    attempts = 0
+    max_unique_attempts = max(10, population_size * 20)
+    while len(chromosomes) < population_size and attempts < max_unique_attempts:
         chromosome = random_chromosome(problem, rng)
         signature = _signature(chromosome)
+        attempts += 1
         if signature in signatures:
             continue
         chromosomes.append(chromosome)
         signatures.add(signature)
+
+    while len(chromosomes) < population_size:
+        chromosomes.append(random_chromosome(problem, rng))
 
     return chromosomes
 

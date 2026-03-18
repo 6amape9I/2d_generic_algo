@@ -3,9 +3,10 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QBrush, QImage, QPainter, QPen, QTransform
-from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsScene, QGraphicsSimpleTextItem
+from PySide6.QtGui import QColor, QBrush, QFont, QImage, QPainter, QPen, QTransform
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsRectItem, QGraphicsScene
 
+from knapsack2d.config import UiEnvConfig, load_ui_env_config
 from knapsack2d.geometry import is_fully_inside_container
 from knapsack2d.models import CandidatePoint, Container, DecodedLayout, Placement
 
@@ -14,9 +15,11 @@ class LayoutScene(QGraphicsScene):
     placement_clicked = Signal(int)
     empty_clicked = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, env_config: UiEnvConfig | None = None, parent=None) -> None:
         super().__init__(parent)
+        self._env_config = env_config or load_ui_env_config()
         self._placement_items: dict[int, QGraphicsRectItem] = {}
+        self.setBackgroundBrush(QBrush(QColor("white")))
 
     def set_layout(
         self,
@@ -38,7 +41,7 @@ class LayoutScene(QGraphicsScene):
             0,
             container.width,
             container.height,
-            QPen(QColor("black"), 1.5),
+            self._pen(QColor("black"), 1.0),
             QBrush(QColor(0, 0, 0, 0)),
         )
         container_item.setData(0, "container")
@@ -59,17 +62,17 @@ class LayoutScene(QGraphicsScene):
 
         if show_candidate_points and candidate_points:
             for point in candidate_points:
-                marker = self.addRect(
-                    point.x - 0.08,
-                    point.y - 0.08,
-                    0.16,
-                    0.16,
-                    QPen(QColor("orange"), 1.2),
-                    QBrush(QColor("orange")),
+                marker = self.addEllipse(
+                    point.x - 0.10,
+                    point.y - 0.10,
+                    0.20,
+                    0.20,
+                    self._pen(QColor("#C26D00"), 1.0),
+                    QBrush(QColor("#F5A623")),
                 )
                 marker.setData(0, "candidate")
 
-        self.setSceneRect(-1, -1, container.width + 2, container.height + 2)
+        self.setSceneRect(-0.8, -0.8, container.width + 1.6, container.height + 1.6)
 
     def placement_items_count(self) -> int:
         return sum(
@@ -112,17 +115,17 @@ class LayoutScene(QGraphicsScene):
         is_selected: bool,
     ) -> None:
         if placement.is_virtual:
-            pen = QPen(QColor("gray"), 1)
-            brush = QBrush(QColor(130, 130, 130, 90))
+            pen = self._pen(QColor("#6B7280"), 0.9)
+            brush = QBrush(QColor(130, 130, 130, 80))
         elif not inside:
-            pen = QPen(QColor("red"), 1.4, Qt.DashLine)
-            brush = QBrush(QColor(255, 0, 0, 95))
+            pen = self._pen(QColor("#B91C1C"), 1.0, Qt.DashLine)
+            brush = QBrush(QColor(255, 0, 0, 85))
         else:
-            pen = QPen(QColor("black"), 1)
-            brush = QBrush(QColor(100, 149, 237, 150))
+            pen = self._pen(QColor("#111827"), 0.85)
+            brush = QBrush(QColor(55, 132, 214, 155))
 
         if is_selected:
-            pen = QPen(QColor("yellow"), 2.4)
+            pen = self._pen(QColor("#F59E0B"), 1.6)
 
         rect_item = self.addRect(
             placement.x,
@@ -135,20 +138,6 @@ class LayoutScene(QGraphicsScene):
         rect_item.setData(0, "placement")
         rect_item.setData(1, placement.item_id)
         rect_item.setData(2, index)
-        rect_item.setData(
-            3,
-            {
-                "item_id": placement.item_id,
-                "x": placement.x,
-                "y": placement.y,
-                "w": placement.width,
-                "h": placement.height,
-                "rotated": placement.rotated,
-                "value": placement.value,
-                "is_virtual": placement.is_virtual,
-                "inside_container": inside,
-            },
-        )
         self._placement_items[index] = rect_item
 
         rect_item.setToolTip(
@@ -167,8 +156,34 @@ class LayoutScene(QGraphicsScene):
         )
 
         if show_labels and placement.item_id is not None:
-            text = self.addSimpleText(placement.item_id)
-            text.setData(0, "label")
-            text.setPos(placement.x + 0.1, placement.y + 0.1)
-            if isinstance(text, QGraphicsSimpleTextItem):
-                text.setBrush(QBrush(QColor("black")))
+            self._add_label(placement)
+
+    def _add_label(self, placement: Placement) -> None:
+        if min(placement.width, placement.height) < 1.7:
+            return
+
+        pixel_size = max(
+            self._env_config.min_label_pixel_size,
+            min(
+                self._env_config.max_label_pixel_size,
+                min(placement.width, placement.height) * 1.85,
+            ),
+        )
+
+        text_item = self.addSimpleText(placement.item_id)
+        font = QFont(self._env_config.font_family)
+        font.setPixelSize(max(1, int(round(pixel_size))))
+        text_item.setFont(font)
+        text_item.setBrush(QBrush(QColor("#111827")))
+        text_item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        text_item.setData(0, "label")
+        text_item.setZValue(3)
+        text_item.setPos(
+            placement.x + self._env_config.label_padding,
+            placement.y + self._env_config.label_padding,
+        )
+
+    def _pen(self, color: QColor, width: float, style: Qt.PenStyle = Qt.SolidLine) -> QPen:
+        pen = QPen(color, width, style)
+        pen.setCosmetic(True)
+        return pen

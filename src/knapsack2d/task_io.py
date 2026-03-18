@@ -48,16 +48,23 @@ def load_problem_txt(path: str | Path) -> ProblemInstance:
             raise ValueError(f"unexpected line before ITEMS at {line_number}: {line}")
 
         parts = line.split()
-        if len(parts) != 5:
+        if len(parts) == 4:
+            item_id, width_s, height_s, rotate_s = parts
+        elif len(parts) == 5:
+            item_id, width_s, height_s, _value_s, rotate_s = parts
+        else:
             raise ValueError(f"invalid ITEM line at {line_number}: {line}")
-        item_id, width_s, height_s, value_s, rotate_s = parts
+
         if rotate_s not in {"0", "1"}:
             raise ValueError(f"invalid can_rotate value at {line_number}: {rotate_s}")
+
+        width = int(width_s)
+        height = int(height_s)
         builder.add_item(
             item_id=item_id,
-            width=int(width_s),
-            height=int(height_s),
-            value=int(value_s),
+            width=width,
+            height=height,
+            value=width * height,
             can_rotate=rotate_s == "1",
         )
 
@@ -78,7 +85,7 @@ def save_problem_txt(problem: ProblemInstance, path: str | Path) -> None:
         f"CONTAINER {problem.container.width} {problem.container.height}",
         "",
         "ITEMS",
-        "# id width height value can_rotate",
+        "# id width height area_value can_rotate",
     ]
 
     for item in problem.items:

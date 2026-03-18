@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from knapsack2d.baseline.exhaustive import ExhaustiveSearchResult
 from knapsack2d.ga.config import GAConfig
 from knapsack2d.ga.history import GenerationSnapshot, IndividualSnapshot, RunHistory
 from knapsack2d.ga.individual import Individual
@@ -15,6 +16,7 @@ from knapsack2d.models import (
     ProblemInstance,
 )
 from knapsack2d.ui.presenters.history_mapper import HistoryMapper
+from knapsack2d.ui.run_models import PopulationStudyPoint, PopulationStudyResult
 
 
 def _build_result() -> tuple[ProblemInstance, GAResult]:
@@ -31,6 +33,7 @@ def _build_result() -> tuple[ProblemInstance, GAResult]:
         virtual_blocks_count=0,
         used_area_inside=4,
         fill_ratio=0.25,
+        large_first_score=4,
     )
     layout = DecodedLayout(
         placements=[Placement("A", 0, 0, 2, 2, False, 10)],
@@ -107,3 +110,38 @@ def test_history_export_and_report_files(tmp_path: Path) -> None:
     assert "saved_generations" in history
     assert "best_solution_overall" in history
     assert "Problem: export-test" in report_text
+
+
+def test_history_export_includes_population_study_and_exhaustive(tmp_path: Path) -> None:
+    problem, result = _build_result()
+    mapper = HistoryMapper()
+    history_path = tmp_path / "history_with_study.json"
+
+    mapper.save_history_json(
+        history_path,
+        problem,
+        result,
+        population_study=PopulationStudyResult(
+            points=(
+                PopulationStudyPoint(100, 10, 1, 0.25, 0, 0.1, (10, 1, 4, 0, 0), "ind-1"),
+                PopulationStudyPoint(160, 12, 1, 0.25, 0, 0.2, (12, 1, 4, 0, 0), "ind-2"),
+            )
+        ),
+        exhaustive_baseline=ExhaustiveSearchResult(
+            status="completed",
+            duration_seconds=0.1,
+            evaluated_solutions=24,
+            total_search_space=24,
+            best_chromosome=result.best_individual.chromosome,
+            best_fitness_breakdown=result.best_individual.fitness_breakdown,
+            best_decoded_layout=result.best_individual.decoded_layout,
+            reason=None,
+        ),
+    )
+
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+
+    assert history["population_study"] is not None
+    assert history["population_study"]["best_point"]["population_size"] == 160
+    assert history["exhaustive_baseline"] is not None
+    assert history["exhaustive_baseline"]["status"] == "completed"

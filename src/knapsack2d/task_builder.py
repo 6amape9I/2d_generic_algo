@@ -35,11 +35,13 @@ class ProblemBuilder:
             raise ValueError("item_id must be non-empty")
         if normalized_id in self._items:
             raise ValueError(f"duplicate item_id: {normalized_id}")
+
+        # Item value is derived from geometry; the provided value is ignored.
         item = Item(
             item_id=normalized_id,
             width=width,
             height=height,
-            value=value,
+            value=width * height,
             can_rotate=can_rotate,
         )
         self._items[normalized_id] = item

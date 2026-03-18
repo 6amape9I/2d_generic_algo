@@ -26,8 +26,8 @@ class Item:
             raise ValueError("item_id must be non-empty")
         if self.width <= 0 or self.height <= 0:
             raise ValueError("item dimensions must be positive")
-        if self.value <= 0:
-            raise ValueError("item value must be positive")
+
+        object.__setattr__(self, "value", self.width * self.height)
 
 
 @dataclass(frozen=True)
@@ -119,3 +119,4 @@ class FitnessBreakdown:
     virtual_blocks_count: int
     used_area_inside: int
     fill_ratio: float
+    large_first_score: int = 0

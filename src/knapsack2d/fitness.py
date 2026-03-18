@@ -24,6 +24,10 @@ class FitnessEvaluator:
         overflow_items_count = 0
         virtual_blocks_count = 0
         used_area_inside = 0
+        large_first_score = 0
+
+        valid_rank = 0
+        total_items = max(1, len(problem.items))
 
         for placement in layout.placements:
             if placement.is_virtual:
@@ -33,9 +37,12 @@ class FitnessEvaluator:
             packed_items_count += 1
             inside = is_fully_inside_container(placement, problem.container)
             if inside:
+                area = placement.width * placement.height
                 valid_items_count += 1
                 total_value += placement.value
-                used_area_inside += placement.width * placement.height
+                used_area_inside += area
+                large_first_score += area * (total_items - valid_rank)
+                valid_rank += 1
                 continue
 
             overflow_items_count += 1
@@ -53,4 +60,5 @@ class FitnessEvaluator:
             virtual_blocks_count=virtual_blocks_count,
             used_area_inside=used_area_inside,
             fill_ratio=fill_ratio,
+            large_first_score=large_first_score,
         )

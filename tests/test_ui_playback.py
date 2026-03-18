@@ -5,6 +5,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from knapsack2d.baseline.exhaustive import ExhaustiveSearchResult
 from knapsack2d.ga.chromosome import Chromosome
 from knapsack2d.ga.config import GAConfig
 from knapsack2d.ga.history import GenerationSnapshot, IndividualSnapshot, RunHistory
@@ -12,6 +13,7 @@ from knapsack2d.ga.individual import Individual
 from knapsack2d.ga.optimizer import GAResult
 from knapsack2d.models import Container, DecodedLayout, FitnessBreakdown, Item, Placement, ProblemInstance
 from knapsack2d.ui.main_window import MainWindow
+from knapsack2d.ui.run_models import PopulationStudyPoint, PopulationStudyResult
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -38,6 +40,7 @@ def _build_problem_and_result() -> tuple[ProblemInstance, GAResult]:
         virtual_blocks_count=0,
         used_area_inside=4,
         fill_ratio=0.25,
+        large_first_score=4,
     )
     breakdown_1 = FitnessBreakdown(
         total_value=6,
@@ -47,6 +50,7 @@ def _build_problem_and_result() -> tuple[ProblemInstance, GAResult]:
         virtual_blocks_count=0,
         used_area_inside=4,
         fill_ratio=0.25,
+        large_first_score=4,
     )
 
     layout_0 = DecodedLayout(
@@ -163,3 +167,37 @@ def test_scene_selection_syncs_tables() -> None:
 
     assert placement_rows and placement_rows[0].row() == 0
     assert gene_rows and gene_rows[0].row() == 0
+
+
+def test_statistics_dialog_opens_with_population_study_and_baseline() -> None:
+    _app()
+    window = MainWindow()
+
+    problem, result = _build_problem_and_result()
+    window.set_result(
+        problem,
+        result,
+        population_study=PopulationStudyResult(
+            points=(
+                PopulationStudyPoint(100, 5, 1, 0.25, 0, 0.1, (5, 1, 4, 0, 0), "g0-1"),
+                PopulationStudyPoint(140, 6, 1, 0.25, 0, 0.2, (6, 1, 4, 0, 0), "g1-1"),
+            )
+        ),
+        exhaustive_baseline=ExhaustiveSearchResult(
+            status="completed",
+            duration_seconds=0.1,
+            evaluated_solutions=2,
+            total_search_space=2,
+            best_chromosome=result.best_individual.chromosome,
+            best_fitness_breakdown=result.best_individual.fitness_breakdown,
+            best_decoded_layout=result.best_individual.decoded_layout,
+            reason=None,
+        ),
+    )
+
+    window._on_statistics_requested()
+
+    assert window.statistics_dialog.isVisible()
+    assert window.statistics_dialog.charts_panel.history_generation_count == 2
+    assert window.statistics_dialog.charts_panel.population_study_point_count == 2
+    assert "exhaustive" in window.statistics_dialog.charts_panel.baseline_summary.text().lower()

@@ -6,9 +6,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from knapsack2d.baseline.exhaustive import ExhaustiveSearchResult
 from knapsack2d.ga.history import GenerationSnapshot, IndividualSnapshot, RunHistory
 from knapsack2d.ga.optimizer import GAResult
 from knapsack2d.models import ProblemInstance
+from knapsack2d.ui.run_models import PopulationStudyResult
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,9 @@ class HistoryMapper:
         self,
         problem: ProblemInstance,
         result: GAResult,
+        *,
+        population_study: PopulationStudyResult | None = None,
+        exhaustive_baseline: ExhaustiveSearchResult | None = None,
     ) -> dict[str, Any]:
         payload = {
             "problem": {
@@ -86,6 +91,8 @@ class HistoryMapper:
                 },
                 "decoded_layout": asdict(result.best_individual.decoded_layout),
             },
+            "population_study": _population_study_export(population_study),
+            "exhaustive_baseline": _exhaustive_export(exhaustive_baseline),
         }
         return _json_ready(payload)
 
@@ -119,8 +126,16 @@ class HistoryMapper:
         path: str | Path,
         problem: ProblemInstance,
         result: GAResult,
+        *,
+        population_study: PopulationStudyResult | None = None,
+        exhaustive_baseline: ExhaustiveSearchResult | None = None,
     ) -> None:
-        payload = self.build_history_export(problem, result)
+        payload = self.build_history_export(
+            problem,
+            result,
+            population_study=population_study,
+            exhaustive_baseline=exhaustive_baseline,
+        )
         Path(path).write_text(
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -182,6 +197,21 @@ class HistoryMapper:
             origin=snapshot.origin_type,
             parents=parents,
         )
+
+
+def _population_study_export(population_study: PopulationStudyResult | None) -> dict[str, Any] | None:
+    if population_study is None:
+        return None
+    return {
+        "points": [asdict(point) for point in population_study.points],
+        "best_point": asdict(population_study.best_point),
+    }
+
+
+def _exhaustive_export(exhaustive_baseline: ExhaustiveSearchResult | None) -> dict[str, Any] | None:
+    if exhaustive_baseline is None:
+        return None
+    return asdict(exhaustive_baseline)
 
 
 def _json_ready(value: Any) -> Any:

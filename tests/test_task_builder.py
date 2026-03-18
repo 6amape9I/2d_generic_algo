@@ -29,3 +29,15 @@ def test_remove_unknown_item_raises_key_error() -> None:
 
     with pytest.raises(KeyError):
         builder.remove_item("missing")
+
+
+def test_builder_derives_value_from_area() -> None:
+    problem = (
+        ProblemBuilder()
+        .set_name("area-value")
+        .set_container(10, 5)
+        .add_item("A", 3, 4, 999)
+        .build()
+    )
+
+    assert problem.items[0].value == 12

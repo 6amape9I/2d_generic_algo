@@ -1,17 +1,18 @@
 ﻿from __future__ import annotations
 
-from .candidates import CandidateManager
-from .geometry import rects_overlap, right, top
-from .models import (
+from knapsack2d.candidates import CandidateManager
+from knapsack2d.geometry import rects_overlap, right, top
+from knapsack2d.models import (
     CandidatePoint,
     DecodedLayout,
     DecodeStep,
     Gene,
+    Item,
     Placement,
     ProblemInstance,
     SequenceSolution,
 )
-from .policies import VoidBlockPolicy
+from knapsack2d.policies import VoidBlockPolicy
 
 
 class LeftBottomDecoder:
@@ -21,13 +22,14 @@ class LeftBottomDecoder:
         void_block_policy: VoidBlockPolicy = VoidBlockPolicy.DISABLED,
     ) -> None:
         self._void_block_policy = void_block_policy
+        self._item_map_cache: dict[int, dict[str, Item]] = {}
 
     def decode(
         self,
         problem: ProblemInstance,
         solution: SequenceSolution,
     ) -> DecodedLayout:
-        item_map = {item.item_id: item for item in problem.items}
+        item_map = self._item_map(problem)
         candidate_manager = CandidateManager()
         placements: list[Placement] = []
         steps: list[DecodeStep] = []
@@ -46,7 +48,7 @@ class LeftBottomDecoder:
                 )
                 continue
 
-            tested_points = tuple(candidate_manager.next_points())
+            tested_points = candidate_manager.next_points()
             placement, chosen_point = self._place_item(
                 problem=problem,
                 placements=placements,
@@ -98,6 +100,14 @@ class LeftBottomDecoder:
             steps=steps,
             used_solution_order=[gene.item_id for gene in solution.genes],
         )
+
+    def _item_map(self, problem: ProblemInstance) -> dict[str, Item]:
+        cache_key = id(problem)
+        cached = self._item_map_cache.get(cache_key)
+        if cached is None:
+            cached = {item.item_id: item for item in problem.items}
+            self._item_map_cache = {cache_key: cached}
+        return cached
 
     def _place_item(
         self,
